@@ -1,9 +1,12 @@
 streamlit
-streamlit-folium
+earthengine-api
 folium
+streamlit-folium
+plotly
 pandas
 numpy
+scipy
 pulp
 groq
+requests
 python-dotenv
-earthengine-api
