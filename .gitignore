@@ -19,9 +19,6 @@ env/
 DejaVuSans.ttf
 DejaVuSans-Bold.ttf
 
-# Streamlit
-.streamlit/
-
 # OS
 .DS_Store
 Thumbs.db
