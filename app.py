@@ -210,6 +210,16 @@ hr { border-color: #1A2E4A !important; margin: 1.2rem 0 !important; }
 [data-testid="stSlider"] > div > div > div {
     background: linear-gradient(90deg,#00D4AA,#00A896) !important;
 }
+/* Fix slider min/max labels — remove green background */
+[data-testid="stSlider"] div[data-testid="stTickBarMin"],
+[data-testid="stSlider"] div[data-testid="stTickBarMax"],
+[data-testid="stSlider"] > div > div > div:first-child,
+[data-testid="stSlider"] > div > div > div:last-child,
+[data-testid="stSlider"] span {
+    background: transparent !important;
+    background-image: none !important;
+    color: #6B7FA3 !important;
+}
 
 /* ── Progress ── */
 .stProgress > div > div > div {
@@ -329,8 +339,8 @@ hr { border-color: #1A2E4A !important; margin: 1.2rem 0 !important; }
 .ta-score-sum { font-size: 0.82rem; color: #B0BDD4; margin-top: 0.25rem; line-height: 1.4; }
 
 .ta-sat-grid {
-    display: grid; grid-template-columns: 1fr 1fr;
-    gap: 0.6rem; margin-top: 0.8rem; margin-bottom: 1rem;
+    display: grid; grid-template-columns: 1fr 1fr 1fr 1fr;
+    gap: 0.6rem; margin-top: 0.4rem; margin-bottom: 0.6rem;
 }
 .ta-sat-cell {
     background: #080E1C;
@@ -642,7 +652,7 @@ tab_geo, tab_price, tab_budget, tab_multi, tab_report = st.tabs([
 # ══════════════════════════════════════════════
 
 with tab_geo:
-    map_col, ctrl_col = st.columns([2, 1])
+    map_col, ctrl_col = st.columns([3, 1])
 
     with map_col:
         m = folium.Map(location=[st.session_state.lat, st.session_state.lon], zoom_start=14)
@@ -663,7 +673,7 @@ with tab_geo:
             tooltip=st.session_state.address[:60],
             icon=folium.Icon(color="green", icon="circle", prefix="fa"),
         ).add_to(m)
-        st_folium(m, width=640, height=400, returned_objects=[])
+        st_folium(m, width=None, height=320, returned_objects=[])
 
     with ctrl_col:
         st.markdown(f"""
@@ -723,53 +733,100 @@ with tab_geo:
                 st.session_state.ndvi_df = ndvi_df; st.session_state.viirs_df = viirs_df
                 st.session_state.asset_score = score; st.session_state.comparison_df = comp_df
 
-        # Asset Score card
-        if st.session_state.scan_done and st.session_state.asset_score:
-            sc = st.session_state.asset_score
-            st.markdown(f"""
-            <div class="ta-score-card" style="background:{sc.color};border-color:{sc.color}">
-                <div class="ta-score-num">{sc.score}</div>
-                <div>
-                    <div class="ta-score-lbl">{sc.emoji} {sc.label} потенціал</div>
-                    <div class="ta-score-sum">{sc.summary}</div>
+
+    # ── Asset Score + Telemetry (full width) ──────────────────────────────
+    if st.session_state.scan_done and st.session_state.asset_score:
+        sc = st.session_state.asset_score
+
+        # One pure HTML block — no Streamlit columns, perfect height alignment
+        sat = st.session_state.sat_data
+        ndvi = sat["ndvi_score"]; ndbi = sat["ndbi_score"]
+        viirs = sat["night_light_rad"]; sar_d = sat["sar_detected_changes"]
+
+        is_agri  = st.session_state.land_type in ("Сільське господарство", "Пасовище")
+        is_built = st.session_state.land_type in ("Забудова", "Промисловість")
+
+        if is_agri:
+            ndvi_cls  = "err" if ndvi < 0.2 else ("warn" if ndvi < 0.35 else "ok")
+            ndbi_cls  = "err" if ndbi > 0.1 else "ok"
+            viirs_cls = "err" if viirs > 2.5 else ("warn" if viirs > 1.0 else "ok")
+            sar_cls   = "warn" if sar_d else "ok"
+            ndvi_txt  = "Норма" if ndvi>=0.35 else ("Низький" if ndvi>=0.2 else "Критично низький")
+            ndbi_txt  = "Тверде покриття — аномалія" if ndbi>0.1 else "Норма"
+            viirs_txt = "Аномалія" if viirs>2.5 else ("Помірна активність" if viirs>1.0 else "Норма")
+            sar_txt   = "Зміна — аномалія" if sar_d else "Стабільна"
+        elif is_built:
+            ndvi_cls  = "warn" if ndvi > 0.4 else "ok"
+            ndbi_cls  = "warn" if ndbi < 0.0 else "ok"
+            viirs_cls = "err" if viirs < 0.5 else ("warn" if viirs < 1.5 else "ok")
+            sar_cls   = "ok"
+            ndvi_txt  = "Заростає" if ndvi>0.4 else "Норма"
+            ndbi_txt  = "Норма" if ndbi>0.05 else "Низький для забудови"
+            viirs_txt = "Норма" if viirs>=1.5 else ("Низька активність" if viirs>=0.5 else "Занедбана")
+            sar_txt   = "Будівельна активність" if sar_d else "Стабільна"
+        else:
+            ndvi_cls = ndbi_cls = viirs_cls = sar_cls = "ok"
+            ndvi_txt = "Норма" if ndvi>=0.3 else "Низький"
+            ndbi_txt = "Тверде покриття" if ndbi>0.1 else "Норма"
+            viirs_txt = "Активність" if viirs>2.0 else "Норма"
+            sar_txt = "Зміна" if sar_d else "Стабільна"
+
+        def _cls_color(cls):
+            return {"ok": "#00D4AA", "warn": "#F5A623", "err": "#FF6B6B"}.get(cls, "#B0BDD4")
+
+        st.markdown(f"""
+        <div style="display:flex;gap:0.7rem;align-items:stretch;margin-bottom:0.8rem">
+            <div style="flex:0 0 200px;background:rgba(0,0,0,0.55);border-radius:10px;
+                padding:1rem 1.2rem;border:2px solid {sc.color};display:flex;
+                flex-direction:column;justify-content:center;position:relative;overflow:hidden">
+                <div style="position:absolute;inset:0;background:{sc.color};opacity:0.18;border-radius:inherit"></div>
+                <div style="position:relative;z-index:1">
+                <div style="font-family:JetBrains Mono,monospace;font-size:2.4rem;
+                    font-weight:700;color:#fff;line-height:1">{sc.score}</div>
+                <div style="font-size:0.9rem;font-weight:700;color:#fff;margin-top:0.4rem">{sc.emoji} {sc.label}</div>
+                <div style="font-size:0.72rem;color:rgba(255,255,255,0.8);
+                    margin-top:0.3rem;line-height:1.4">{sc.summary}</div>
                 </div>
             </div>
-            """, unsafe_allow_html=True)
-
-            # Satellite telemetry grid
-            sat = st.session_state.sat_data
-            ndvi = sat["ndvi_score"]; ndbi = sat["ndbi_score"]
-            viirs = sat["night_light_rad"]; sar_d = sat["sar_detected_changes"]
-
-            ndvi_cls = "err" if ndvi < 0.2 else ("warn" if ndvi < 0.35 else "ok")
-            ndbi_cls = "err" if ndbi > 0.1 else "ok"
-            viirs_cls = "err" if viirs > 2.5 else ("warn" if viirs > 1.0 else "ok")
-            sar_cls  = "warn" if sar_d else "ok"
-
-            st.markdown(f"""
-            <div class="ta-sat-grid">
+            <div style="flex:1;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:0.6rem">
                 <div class="ta-sat-cell">
                     <div class="ta-sat-label">NDVI · Sentinel-2</div>
                     <div class="ta-sat-value {ndvi_cls}">{ndvi:.3f}</div>
-                    <div class="ta-sat-status {ndvi_cls}">{'Норма' if ndvi>=0.35 else ('Низький' if ndvi>=0.2 else 'Критично')}</div>
+                    <div class="ta-sat-status {ndvi_cls}">{ndvi_txt}</div>
                 </div>
                 <div class="ta-sat-cell">
-                    <div class="ta-sat-label">NDBI · Забудова</div>
+                    <div class="ta-sat-label">NDBI · Sentinel-2</div>
                     <div class="ta-sat-value {ndbi_cls}">{ndbi:.3f}</div>
-                    <div class="ta-sat-status {ndbi_cls}">{'Тверде покриття' if ndbi>0.1 else 'Норма'}</div>
+                    <div class="ta-sat-status {ndbi_cls}">{ndbi_txt}</div>
                 </div>
                 <div class="ta-sat-cell">
-                    <div class="ta-sat-label">VIIRS · Нічні вогні</div>
+                    <div class="ta-sat-label">VIIRS · NASA/NOAA</div>
                     <div class="ta-sat-value {viirs_cls}">{viirs:.2f}</div>
-                    <div class="ta-sat-status {viirs_cls}">{'Аномалія' if viirs>2.5 else ('Помірно' if viirs>1.0 else 'Тихо')}</div>
+                    <div class="ta-sat-status {viirs_cls}">{viirs_txt}</div>
                 </div>
                 <div class="ta-sat-cell">
                     <div class="ta-sat-label">SAR · Sentinel-1</div>
                     <div class="ta-sat-value {sar_cls}">Δ {sat['sar_delta_db']:+.1f} dB</div>
-                    <div class="ta-sat-status {sar_cls}">{'Зміна поверхні' if sar_d else 'Стабільна'}</div>
+                    <div class="ta-sat-status {sar_cls}">{sar_txt}</div>
                 </div>
             </div>
-            """, unsafe_allow_html=True)
+        </div>
+        """, unsafe_allow_html=True)
+
+        st.markdown("<div style='margin-top:0.8rem'></div>", unsafe_allow_html=True)
+        with st.expander("Деталізація Asset Score", expanded=False):
+            rows_html = "".join([
+                f"""<div style="display:flex;justify-content:space-between;
+                    align-items:center;padding:0.45rem 0;
+                    border-bottom:1px solid #1A2E4A">
+                    <span style="font-size:0.8rem;color:#8B9BB4">{comp}: {desc}</span>
+                    <span style="font-family:JetBrains Mono,monospace;font-size:0.85rem;
+                        color:#00D4AA;white-space:nowrap;margin-left:1rem">{val:.1f} б</span>
+                </div>"""
+                for comp, (val, desc) in sc.breakdown.items()
+            ])
+            st.markdown(f"<div style='padding:0.2rem 0'>{rows_html}</div>",
+                unsafe_allow_html=True)
 
             st.markdown("<div style='margin-top:0.8rem'></div>", unsafe_allow_html=True)
             # Year comparison panel
@@ -825,12 +882,7 @@ with tab_geo:
                 </div>
                 """, unsafe_allow_html=True)
 
-            st.markdown("<div style='margin-top:0.8rem'></div>", unsafe_allow_html=True)
-            with st.expander("Деталізація Asset Score"):
-                for comp, (val, desc) in sc.breakdown.items():
-                    c1, c2 = st.columns([4, 1])
-                    c1.caption(f"{comp}: {desc}")
-                    c2.markdown(f"<span style='font-family:JetBrains Mono;color:#00D4AA'>{val:.1f}б</span>", unsafe_allow_html=True)
+
 
     # Comparison table
     if st.session_state.scan_done and st.session_state.comparison_df is not None:
@@ -892,8 +944,9 @@ with tab_geo:
                     x=ndvi_df["date"], y=ndvi_df["NDBI"], name="NDBI",
                     line=dict(color="#FF6B6B", width=1.5, dash="dot"), opacity=0.7,
                 ))
-            fig.add_hline(y=0.3, line_dash="dash", line_color="#F5A623",
-                          annotation_text="Норма с/г", annotation_font_color="#F5A623")
+            if is_agri:
+                fig.add_hline(y=0.3, line_dash="dash", line_color="#F5A623",
+                              annotation_text="Норма с/г", annotation_font_color="#F5A623")
             fig.add_hrect(y0=-0.2, y1=0.2, fillcolor="#FF6B6B", opacity=0.04)
             fig.update_layout(title="Sentinel-2 · NDVI / NDBI", height=340,
                               legend=dict(orientation="h", y=-0.3, bgcolor="rgba(0,0,0,0)"),
@@ -907,15 +960,30 @@ with tab_geo:
                 fig2 = go.Figure()
                 fig2.add_trace(go.Bar(
                     x=viirs_df["date"], y=viirs_df["avg_radiance"],
-                    marker_color=["#FF6B6B" if v>4 else "#F5A623" if v>2 else "#00D4AA"
-                                  for v in viirs_df["avg_radiance"]],
+                    marker_color=[
+                        # С/г: висока = аномалія (червоний), низька = норма (зелений)
+                        # Забудова: висока = норма (зелений), низька = аномалія (червоний)
+                        ("#FF6B6B" if v>4 else "#F5A623" if v>2 else "#00D4AA")
+                        if is_agri else
+                        ("#00D4AA" if v>=1.5 else "#F5A623" if v>=0.5 else "#FF6B6B")
+                        for v in viirs_df["avg_radiance"]
+                    ],
                 ))
-                fig2.add_hline(y=2.0, line_dash="dash", line_color="#FF6B6B",
-                               annotation_text="Поріг аномалії", annotation_font_color="#FF6B6B")
+                if is_agri:
+                    fig2.add_hline(y=2.0, line_dash="dash", line_color="#FF6B6B",
+                                   annotation_text="Поріг аномалії", annotation_font_color="#FF6B6B")
+                else:
+                    fig2.add_hline(y=1.5, line_dash="dash", line_color="#F5A623",
+                                   annotation_text="Мін. норма для забудови", annotation_font_color="#F5A623")
                 fig2.update_layout(title="VIIRS · Нічна активність (нВт/см²/ср)",
                                    height=340, showlegend=False, **PLOTLY_DARK)
                 st.plotly_chart(fig2, use_container_width=True)
-                st.caption("Джерело: NASA/NOAA VIIRS DNB via Google Earth Engine · зелений = норма, жовтий = помірно, червоний = аномалія")
+                viirs_legend = (
+                    "зелений = норма, жовтий = помірно, червоний = аномалія"
+                    if is_agri else
+                    "зелений = норма (є активність), жовтий = низька, червоний = занедбана ділянка"
+                )
+                st.caption(f"Джерело: NASA/NOAA VIIRS DNB via Google Earth Engine · {viirs_legend}")
     else:
         st.markdown("""
         <div style="text-align:center;padding:3rem;background:#0B1425;border:1px dashed #1A2E4A;border-radius:12px;margin-top:1rem">
@@ -1019,7 +1087,11 @@ with tab_budget:
         color_discrete_sequence=["#00D4AA","#3B82F6","#F5A623"],
         hole=0.45,
     )
-    fig_pie.update_traces(textfont_color="#E8EDF5", textfont_family="Space Grotesk")
+    fig_pie.update_traces(
+        textfont_color="#E8EDF5",
+        textfont_family="Space Grotesk",
+        hovertemplate="<b>%{label}</b><br>%{value:,.0f} грн<br>%{percent}<extra></extra>",
+    )
     fig_pie.update_layout(
         title="Розподіл за соціальною корисністю",
         height=380,

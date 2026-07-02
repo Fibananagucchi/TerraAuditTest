@@ -19,11 +19,26 @@ EE_IS_ACTIVE = False
 def init_gee(project: str = None):
     """
     Ініціалізація Google Earth Engine.
-    project береться з .env або передається напряму.
+    Підтримує три середовища автоматично:
+      1. Локально — після python auth.py
+      2. Streamlit Cloud — GEE_CREDENTIALS з Secrets
+      3. Demo-режим — якщо GEE недоступний
     """
     global EE_IS_ACTIVE
-    import os
+    import os, json
     project = project or os.environ.get("GEE_PROJECT", "terraaudit-hackathon")
+
+    # Streamlit Cloud: записуємо credentials з Secrets у стандартний шлях
+    gee_creds = os.environ.get("GEE_CREDENTIALS")
+    if gee_creds:
+        try:
+            creds_path = os.path.expanduser("~/.config/earthengine/credentials")
+            os.makedirs(os.path.dirname(creds_path), exist_ok=True)
+            with open(creds_path, "w") as f:
+                f.write(gee_creds)
+        except Exception as e:
+            print(f"⚠️ Не вдалось записати GEE credentials: {e}")
+
     try:
         ee.Initialize(project=project)
         EE_IS_ACTIVE = True
