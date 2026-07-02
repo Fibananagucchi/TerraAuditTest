@@ -93,13 +93,15 @@ def get_ndvi_timeseries(
     lat: float,
     lon: float,
     start_year: int = 2021,
-    end_year: int = 2024,
+    end_year: int = None,
     buffer_m: int = 300,
 ) -> pd.DataFrame:
     """
     Будує місячний NDVI + NDBI часовий ряд через GEE.
     Якщо GEE недоступний — повертає demo-дані.
     """
+    if end_year is None:
+        end_year = datetime.now().year - 1  # поточний рік неповний
     if not EE_IS_ACTIVE:
         return _demo_ndvi_timeseries(start_year, end_year)
 
@@ -157,10 +159,12 @@ def get_viirs_nightlights(
     lat: float,
     lon: float,
     start_year: int = 2021,
-    end_year: int = 2024,
+    end_year: int = None,
     buffer_m: int = 500,
 ) -> pd.DataFrame:
     """Місячний ряд нічної яскравості VIIRS для ділянки."""
+    if end_year is None:
+        end_year = datetime.now().year - 1  # поточний рік неповний
     if not EE_IS_ACTIVE:
         return _demo_viirs(start_year, end_year)
 
@@ -263,34 +267,41 @@ def get_sar_change(
 # ГОЛОВНА ФУНКЦІЯ АНАЛІЗУ (для app.py)
 # ─────────────────────────────────────────────
 
-def analyze_satellite_data(lat: float, lon: float) -> dict:
+def analyze_satellite_data(lat: float, lon: float, year: int = 2023) -> dict:
     """
     Повний аналіз ділянки: NDVI snapshot + VIIRS + SAR.
+    year — рік для якого робиться snapshot (впливає на значення NDVI/VIIRS).
     Завжди повертає результат (real або demo).
     """
-    # NDVI — один знімок за літо 2023 для швидкого скорингу
-    ndvi_df = get_ndvi_timeseries(lat, lon, start_year=2023, end_year=2023)
+    # NDVI — snapshot за обраний рік (літні місяці для максимального NDVI)
+    ndvi_df = get_ndvi_timeseries(lat, lon, start_year=year, end_year=year)
     ndvi_val = float(ndvi_df["NDVI"].mean()) if len(ndvi_df) > 0 else 0.15
     ndbi_val = float(ndvi_df["NDBI"].mean()) if "NDBI" in ndvi_df.columns else 0.0
 
-    # VIIRS — середня за 2023
-    viirs_df = get_viirs_nightlights(lat, lon, start_year=2023, end_year=2023)
+    # VIIRS — середня за обраний рік
+    viirs_df = get_viirs_nightlights(lat, lon, start_year=year, end_year=year)
     viirs_val = float(viirs_df["avg_radiance"].mean()) if len(viirs_df) > 0 else 0.0
 
-    # SAR
-    sar = get_sar_change(lat, lon)
+    # SAR — порівнює рік до обраного vs обраний рік
+    baseline_year = max(year - 1, 2020)
+    sar = get_sar_change(
+        lat, lon,
+        baseline=(f"{baseline_year}-01-01", f"{baseline_year}-12-31"),
+        current=(f"{year}-01-01",           f"{year}-12-31"),
+    )
 
-    source_label = "GEE (реальні дані)" if EE_IS_ACTIVE else "⚠️ Demo-режим (GEE не підключено)"
+    source_label = f"GEE (реальні дані, {year}р.)" if EE_IS_ACTIVE else "Demo-режим (GEE не підключено)"
 
     return {
-        "status":             "success",
-        "ndvi_score":         round(ndvi_val, 3),
-        "ndbi_score":         round(ndbi_val, 3),
-        "night_light_rad":    round(viirs_val, 2),
+        "status":               "success",
+        "ndvi_score":           round(ndvi_val, 3),
+        "ndbi_score":           round(ndbi_val, 3),
+        "night_light_rad":      round(viirs_val, 2),
         "sar_detected_changes": sar["changed"],
-        "sar_delta_db":       sar["delta_db"],
-        "source":             source_label,
-        "is_demo":            not EE_IS_ACTIVE,
+        "sar_delta_db":         sar["delta_db"],
+        "source":               source_label,
+        "is_demo":              not EE_IS_ACTIVE,
+        "year":                 year,
     }
 
 

@@ -10,3 +10,5 @@ pulp
 groq
 requests
 python-dotenv
+fpdf2
+matplotlib
