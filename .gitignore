@@ -1,1 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Virtual environment
+venv/
+env/
+
+# Environment variables
 .env
+
+# IDE
+.idea/
+.vscode/
+
+# Fonts
+DejaVuSans.ttf
+DejaVuSans-Bold.ttf
+
+# Streamlit
+.streamlit/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
