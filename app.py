@@ -573,7 +573,8 @@ with st.sidebar:
 # ─────────────────────────────────────────────
 
 min_p, max_p, median_p, match_level = price_corridor.calculate_corridor(
-    st.session_state.area_ha, st.session_state.land_type, st.session_state.address
+    st.session_state.area_ha, st.session_state.land_type, st.session_state.address,
+    start_year=start_year,
 )
 st.session_state.min_p = min_p
 st.session_state.max_p = max_p
@@ -1000,7 +1001,8 @@ with tab_geo:
 
 with tab_price:
     st.markdown("### Ціновий коридор")
-    st.caption("Статистичний аналіз завершених аукціонів Прозорро.Продажі")
+    _effective_year = max(start_year, 2023)
+    st.caption(f"Статистичний аналіз завершених аукціонів Прозорро.Продажі · пошук з {_effective_year} р.")
 
     with st.expander("Як це працює", expanded=False):
         st.markdown("""
@@ -1089,12 +1091,33 @@ with tab_price:
     st.plotly_chart(fig_bar, use_container_width=True)
 
     st.divider()
-    st.markdown("### Порівняльні угоди · Прозорро.Продажі")
+    _title_col, _refresh_col = st.columns([4, 1])
+    with _title_col:
+        st.markdown("### Порівняльні угоди · Прозорро.Продажі")
+    with _refresh_col:
+        st.markdown("<div style='margin-top:0.4rem'></div>", unsafe_allow_html=True)
+        force_refresh_prozorro = st.button("🔄 Оновити", use_container_width=True,
+            help="Примусово перезавантажити дані Прозорро, обходячи кеш")
 
-    with st.spinner("Завантаження лотів…"):
-        if st.session_state.prozorro_df is None:
+    # Перезавантажуємо якщо тип землі АБО рік аналізу змінився, АБО натиснуто "Оновити"
+    _prev_type = st.session_state.get("_prozorro_last_type")
+    _prev_year = st.session_state.get("_prozorro_last_year")
+    if (st.session_state.prozorro_df is None
+            or _prev_type != st.session_state.land_type
+            or _prev_year != start_year
+            or force_refresh_prozorro):
+        with st.spinner("Завантаження лотів…"):
             from prozorro import fetch_land_lots
-            st.session_state.prozorro_df = fetch_land_lots(limit=50)
+            _region = price_corridor.extract_region(st.session_state.address)
+            st.session_state.prozorro_df = fetch_land_lots(
+                region=_region,
+                land_type=st.session_state.land_type,
+                start_year=start_year,
+                limit=50,
+                force_refresh=force_refresh_prozorro,
+            )
+            st.session_state._prozorro_last_type = st.session_state.land_type
+            st.session_state._prozorro_last_year = start_year
 
     df_proz = st.session_state.prozorro_df
     if df_proz is not None and len(df_proz) > 0:
@@ -1217,6 +1240,7 @@ with tab_multi:
                         float(row.get("area_ha",5.0)),
                         str(row.get("land_type","Сільське господарство")),
                         address=parcel_name,  # намагаємось витягти регіон з назви
+                        start_year=start_year,
                     )
                     results.append({
                         "Назва": row.get("name",f"Ділянка {i+1}"),

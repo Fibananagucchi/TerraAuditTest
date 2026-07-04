@@ -32,17 +32,33 @@ _CACHE_TTL = 3600  # 1 година
 # ─────────────────────────────────────────────
 
 def _classify_land_type(type_text: str) -> str:
-    """Визначає внутрішню категорію землі за текстом класифікації Прозорро."""
+    """
+    Визначає внутрішню категорію землі за текстом класифікації Прозорро.
+    Повертає None якщо тип не відповідає жодній з 4 категорій UI
+    (наприклад водний фонд, лісовий фонд тощо) — такі лоти виключаються
+    з вибірки, бо вони не порівнянні з нашими типами землі.
+    """
     t = type_text.lower()
+
+    # Водний/лісовий фонд — окрема категорія активів, НЕ порівнянна
+    # з сільгосп/пасовище/забудова/промисловість. Виключаємо повністю.
+    # Широкий збіг "водн" ловить: водного фонду, водний об'єкт,
+    # водойма, водосховище тощо.
+    if "водн" in t or "рибогосподар" in t or "ставк" in t and "став" in t:
+        return None
+    if "лісов" in t:
+        return None
+
     if "пасовищ" in t or "сіножат" in t:
         return "Пасовище"
-    if "сільськогосп" in t or "рілля" in t or "орн" in t:
-        return "Сільське господарство"
     if "житлов" in t or "громадськ" in t or "забудов" in t:
         return "Забудова"
     if "промислов" in t or "транспорт" in t:
         return "Промисловість"
-    return "Сільське господарство"  # дефолт — більшість лотів це с/г
+    if "сільськогосп" in t or "рілля" in t or "рілл" in t:
+        return "Сільське господарство"
+
+    return None  # невідомий тип — краще виключити, ніж класифікувати неправильно
 
 
 # ─────────────────────────────────────────────
@@ -50,10 +66,11 @@ def _classify_land_type(type_text: str) -> str:
 # ─────────────────────────────────────────────
 
 def fetch_land_auctions(
-    max_records: int = 300,
-    max_requests: int = 15,
+    max_records: int = 500,
+    max_requests: int = 40,
     start_date: str = "2023-06-01T00:00:00.000000Z",
     request_timeout: int = 10,
+    min_real_year: Optional[int] = None,
 ) -> list[dict]:
     """
     Проходить курсорну пагінацію Прозорро, збираючи завершені
@@ -64,6 +81,7 @@ def fetch_land_auctions(
                        date, title, cadastral_number}
     """
     collected = []
+    seen_ids = set()
     date_cursor = start_date
 
     for _ in range(max_requests):
@@ -91,6 +109,10 @@ def fetch_land_auctions(
 
         for item in batch:
             try:
+                item_id = item.get("_id") or item.get("auctionId")
+                if item_id in seen_ids:
+                    continue
+
                 if item.get("status") != "complete":
                     continue
 
@@ -104,7 +126,7 @@ def fetch_land_auctions(
 
                 it0 = items_arr[0]
                 area = it0.get("quantity") or it0.get("itemProps", {}).get("landArea")
-                if not area or area <= 0:
+                if not area or area < 0.1:  # відсіюємо мікро-ділянки (<0.1 га = 1000 м²)
                     continue
 
                 value = item.get("value", {})
@@ -113,7 +135,34 @@ def fetch_land_auctions(
                     continue
 
                 price_per_ha = price / area
-                if not (100 < price_per_ha < 500_000):
+
+                classification_desc = (
+                    it0.get("classification", {})
+                       .get("description", {})
+                       .get("uk_UA", "")
+                )
+                additional_desc = " ".join(
+                    c.get("description", {}).get("uk_UA", "")
+                    for c in it0.get("additionalClassifications", [])
+                )
+                item_desc_raw = it0.get("description", "")
+                if isinstance(item_desc_raw, dict):
+                    item_desc_raw = item_desc_raw.get("uk_UA", "")
+
+                type_text = classification_desc + " " + additional_desc + " " + str(item_desc_raw)
+                land_type = _classify_land_type(type_text)
+                if land_type is None:
+                    continue  # водний фонд, лісовий фонд, невідомий тип — пропускаємо
+
+                # Санітарні межі залежно від типу землі
+                sanity_max = {
+                    "Сільське господарство": 60_000,
+                    "Пасовище":               60_000,
+                    "Забудова":              800_000,
+                    "Промисловість":         500_000,
+                }.get(land_type, 60_000)
+
+                if not (100 < price_per_ha < sanity_max):
                     continue
 
                 region = (
@@ -121,12 +170,6 @@ def fetch_land_auctions(
                        .get("region", {})
                        .get("uk_UA", "")
                 )
-
-                type_text = " ".join(
-                    c.get("description", {}).get("uk_UA", "")
-                    for c in it0.get("additionalClassifications", [])
-                )
-                land_type = _classify_land_type(type_text)
 
                 title_raw = item.get("title", "")
                 title = (
@@ -136,12 +179,20 @@ def fetch_land_auctions(
 
                 cadastral = it0.get("itemProps", {}).get("cadastralNumber", "")
 
+                # Реальна дата завершення аукціону, не дата міграції запису
+                real_date = (
+                    item.get("datePublished")
+                    or item.get("auctionPeriod", {}).get("endDate")
+                    or item.get("dateModified", "")
+                )
+
+                seen_ids.add(item_id)
                 collected.append({
                     "price_per_ha": round(price_per_ha, 0),
                     "area_ha":      round(area, 2),
                     "region":       region,
                     "land_type":    land_type,
-                    "date":         item.get("dateModified", "")[:10],
+                    "date":         real_date[:10] if real_date else "",
                     "title":        title or "Земельна ділянка",
                     "cadastral_number": cadastral,
                 })
@@ -163,17 +214,31 @@ def fetch_land_auctions(
     return collected
 
 
-def get_cached_land_auctions(force_refresh: bool = False) -> list[dict]:
-    """Кешована версія fetch_land_auctions (TTL 1 година)."""
+def get_cached_land_auctions(
+    start_year: Optional[int] = None,
+    force_refresh: bool = False,
+) -> list[dict]:
+    """
+    Кешована версія fetch_land_auctions (TTL 1 година).
+    start_year — рік, з якого починати пошук.
+
+    ВАЖЛИВО: dateModified у Прозорро — це дата останньої зміни запису
+    в системі (міграції), а НЕ реальна дата аукціону. Нова система
+    ЦБД-2 почала повноцінно наповнюватись приблизно з середини 2023.
+    Тому пошук ніколи не стартує раніше 2023 — інакше курсор
+    "витрачає" запити на порожній період і падає на fallback.
+    """
     now = time.time()
-    cache_key = "land_auctions"
+    year = max(start_year or 2023, 2023)  # floor — не шукати раніше 2023
+    cache_key = f"land_auctions_{year}"
 
     if not force_refresh and cache_key in _CACHE:
         data, ts = _CACHE[cache_key]
         if now - ts < _CACHE_TTL:
             return data
 
-    data = fetch_land_auctions()
+    start_date = f"{year}-01-01T00:00:00.000000Z"
+    data = fetch_land_auctions(start_date=start_date)
     _CACHE[cache_key] = (data, now)
     return data
 
@@ -184,22 +249,39 @@ def get_cached_land_auctions(force_refresh: bool = False) -> list[dict]:
 
 def fetch_land_lots(
     region: Optional[str] = None,
+    land_type: Optional[str] = None,
+    start_year: Optional[int] = None,
     status: str = "complete",
     limit: int = 100,
+    force_refresh: bool = False,
 ) -> pd.DataFrame:
     """
     Повертає DataFrame земельних лотів для відображення в таблиці.
     Використовує кешовану курсорну вибірку з нового API.
+    Фільтрує по типу землі якщо вказано.
+    start_year — з якого року шукати (прив'язка до аналізу в UI).
+    force_refresh — обійти кеш і завантажити заново (кнопка "Оновити").
     Якщо реальних даних немає — fallback на синтетичні.
     """
-    records = get_cached_land_auctions()
+    records = get_cached_land_auctions(start_year=start_year, force_refresh=force_refresh)
 
     if len(records) < 5:
         return _demo_data()
 
     df = pd.DataFrame(records)
-    df = df.rename(columns={"price_per_ha": "price_per_ha"})
     df["final_price"] = df["price_per_ha"] * df["area_ha"]
+
+    if land_type and "land_type" in df.columns:
+        filtered = df[df["land_type"] == land_type]
+        # Якщо після фільтру замало записів — показуємо все, але позначаємо
+        if len(filtered) >= 3:
+            df = filtered
+
+    if region and "region" in df.columns:
+        region_filtered = df[df["region"].str.contains(region, case=False, na=False)]
+        if len(region_filtered) >= 3:
+            df = region_filtered
+
     return df.head(limit)
 
 

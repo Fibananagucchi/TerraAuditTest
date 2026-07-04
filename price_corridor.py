@@ -62,16 +62,18 @@ def fetch_prozorro_prices(
     land_type: str,
     area_ha: float,
     region: Optional[str] = None,
+    start_year: Optional[int] = None,
 ) -> tuple:
     """
     Тягне ціни завершених земельних аукціонів з нового Prozorro API.
     4-рівнева фільтрація: регіон+площа → регіон → тип по країні → fallback.
+    start_year — з якого року шукати (прив'язка до "Аналіз від" в UI).
 
     Returns:
         (prices_per_ha: list[float], match_level: str)
     """
     try:
-        all_records = prozorro.get_cached_land_auctions()
+        all_records = prozorro.get_cached_land_auctions(start_year=start_year)
     except Exception as e:
         print(f"⚠️ Прозорро недоступний: {e}")
         all_records = []
@@ -136,9 +138,11 @@ def calculate_corridor(
     land_type: str,
     address: Optional[str] = None,
     input_price: Optional[float] = None,
+    start_year: Optional[int] = None,
 ) -> tuple:
     """
     Обчислює ціновий коридор для ділянки з урахуванням регіону.
+    start_year — рік з якого шукати порівняльні лоти (з "Аналіз від" в UI).
 
     Returns:
         (min_total, max_total, median_total, match_level)
@@ -147,7 +151,7 @@ def calculate_corridor(
         return 0, 0, 0, "none"
 
     region = extract_region(address) if address else None
-    prices, match_level = fetch_prozorro_prices(land_type, area_hectares, region)
+    prices, match_level = fetch_prozorro_prices(land_type, area_hectares, region, start_year)
 
     p25    = float(np.percentile(prices, 25))
     median = float(np.median(prices))
