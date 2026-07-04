@@ -572,12 +572,13 @@ with st.sidebar:
 # Pricing (always computed)
 # ─────────────────────────────────────────────
 
-min_p, max_p, median_p = price_corridor.calculate_corridor(
-    st.session_state.area_ha, st.session_state.land_type
+min_p, max_p, median_p, match_level = price_corridor.calculate_corridor(
+    st.session_state.area_ha, st.session_state.land_type, st.session_state.address
 )
 st.session_state.min_p = min_p
 st.session_state.max_p = max_p
 st.session_state.median_p = median_p
+st.session_state.match_level = match_level
 st.session_state.budget_result = budget_optimizer.optimize_budget(median_p)
 
 
@@ -1001,6 +1002,54 @@ with tab_price:
     st.markdown("### Ціновий коридор")
     st.caption("Статистичний аналіз завершених аукціонів Прозорро.Продажі")
 
+    with st.expander("Як це працює", expanded=False):
+        st.markdown("""
+**Звідки беруться дані:** система звертається до публічного API
+**Прозорро.Продажі** і забирає до 100 останніх **завершених** аукціонів
+оренди землі того самого типу, що й ваша ділянка (CAV-класифікація).
+
+**Як будується коридор — 4 рівні точності:**
+
+1. 🎯 **Регіональні дані** — якщо в тому самому регіоні знайшлось ≥5 лотів
+   зі схожою площею (±50%), коридор рахується саме на них
+2. 🎯 **Регіон (без урахування площі)** — якщо лотів зі схожою площею замало,
+   беруться всі лоти регіону
+3. 🌍 **Загальнонаціональні дані** — якщо в регіоні взагалі мало аукціонів,
+   використовується статистика по всій Україні для цього типу землі
+4. 📊 **Базові орієнтири** — якщо Прозорро API недоступний, коридор
+   рахується на приблизних ринкових цінах (USD/га) помножених на
+   **реальний курс НБУ**
+
+**Як рахуються межі коридору:** з отриманого списку цін (грн/га/рік)
+беруться статистичні перцентилі:
+- **P25** (25-й перцентиль) — нижня межа, "мінімум ринку"
+- **Медіана** — справедлива орієнтовна ціна
+- **P85** (85-й перцентиль) — верхня межа, "максимум ринку"
+
+Це множиться на площу вашої ділянки і показується в картках нижче.
+        """)
+
+    # Бейдж рівня точності даних
+    _match = st.session_state.get("match_level", "national")
+    _match_info = {
+        "regional": ("🎯 Регіональні дані", "#00D4AA",
+                     "Коридор побудований на реальних лотах з того самого регіону"),
+        "national": ("🌍 Загальнонаціональні дані", "#F5A623",
+                     "Недостатньо лотів у регіоні — використано дані по всій Україні"),
+        "fallback": ("📊 Базові орієнтири", "#6B7FA3",
+                     "Прозорро API недоступний — використано ринкові орієнтири"),
+        "none":     ("—", "#6B7FA3", ""),
+    }
+    _label, _color, _desc = _match_info.get(_match, _match_info["national"])
+    st.markdown(f"""
+    <div style="display:inline-flex;align-items:center;gap:0.5rem;
+        background:{_color}1A;border:1px solid {_color}50;border-radius:20px;
+        padding:0.3rem 0.9rem;margin-bottom:0.8rem">
+        <span style="color:{_color};font-size:0.8rem;font-weight:600">{_label}</span>
+        <span style="color:#8B9BB4;font-size:0.75rem">· {_desc}</span>
+    </div>
+    """, unsafe_allow_html=True)
+
     m1, m2, m3 = st.columns(3)
     m1.metric("P25 · Мінімум ринку",  f"{min_p:,.0f} грн/рік")
     m2.metric("Медіана · Орієнтир",   f"{median_p:,.0f} грн/рік")
@@ -1163,8 +1212,12 @@ with tab_multi:
                         sat["sar_detected_changes"], str(row.get("land_type","Сільське господарство")),
                         float(row.get("area_ha",5.0)),
                     )
-                    _, _, med = price_corridor.calculate_corridor(
-                        float(row.get("area_ha",5.0)), str(row.get("land_type","Сільське господарство")))
+                    parcel_name = str(row.get("name", f"Ділянка {i+1}"))
+                    _, _, med, _ = price_corridor.calculate_corridor(
+                        float(row.get("area_ha",5.0)),
+                        str(row.get("land_type","Сільське господарство")),
+                        address=parcel_name,  # намагаємось витягти регіон з назви
+                    )
                     results.append({
                         "Назва": row.get("name",f"Ділянка {i+1}"),
                         "Asset Score": score.score, "Рівень": f"{score.emoji} {score.label}",
