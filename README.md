@@ -10,7 +10,7 @@ TerraAudit is an AI-powered land asset auditing system that helps Ukrainian muni
 
 **Try it here, Google Earth Engine already authorized:**
 
-👉 **[https://YOUR-APP-NAME.streamlit.app](https://YOUR-APP-NAME.streamlit.app)** *(replace with your actual Streamlit Cloud URL)*
+👉 **[https://terraaudit.streamlit.app](https://terraaudit.streamlit.app)**
 
 The hosted version runs with **Live GEE** — real satellite data (Sentinel-2, VIIRS, Sentinel-1 SAR) for any location in Ukraine, no authentication needed on your end.
 
