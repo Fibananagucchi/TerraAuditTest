@@ -237,7 +237,15 @@ def get_cached_land_auctions(
         if now - ts < _CACHE_TTL:
             return data
 
-    start_date = f"{year}-01-01T00:00:00.000000Z"
+    # ВАЖЛИВО: перші місяці 2023 (до червня) у системі ЦБД-2 майже порожні —
+    # курсор "витрачає" запити на порожній період замість щільних даних.
+    # Емпірично підтверджено (діагностика): 2023-06-01 — перевірена робоча
+    # точка старту. Для year > 2023 використовуємо 1 січня цього року,
+    # бо там дані вже щільні.
+    _proven_start = "2023-06-01T00:00:00.000000Z"
+    _candidate = f"{year}-01-01T00:00:00.000000Z"
+    start_date = _candidate if _candidate > _proven_start else _proven_start
+
     data = fetch_land_auctions(start_date=start_date)
     _CACHE[cache_key] = (data, now)
     return data
