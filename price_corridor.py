@@ -171,27 +171,50 @@ def price_verdict(
     max_price: float,
     median_price: float,
 ) -> dict:
-    """Вердикт для демо-повзунка на пітчі."""
+    """
+    Вердикт для демо-повзунка на пітчі.
+
+    Перевіряє ДВІ умови незалежно:
+    1. Абсолютний поріг — чи нижче P25 / вище P85*1.3
+    2. Відносне відхилення від медіани (%) — навіть якщо P25 сам по собі
+       низький через широкий розкид вибірки, велике відхилення від
+       медіани (>50%) все одно має позначатись як підозріле.
+    """
     if median_price <= 0:
         return {"verdict": "unknown", "deviation_pct": 0, "message": "Недостатньо даних"}
 
     dev = round((proposed - median_price) / median_price * 100, 1)
 
-    if proposed < min_price:
+    is_below_p25   = proposed < min_price
+    is_way_below   = dev <= -50.0   # більше half медіани вниз — підозріло незалежно від P25
+    is_above_p85   = proposed > max_price * 1.3
+    is_way_above   = dev >= 100.0   # вдвічі вище медіани і більше
+
+    if is_below_p25 or is_way_below:
+        reason = (
+            f"нижча за 25-й перцентиль ринку ({min_price:,.0f} грн)"
+            if is_below_p25 else
+            f"на {abs(dev):.0f}% нижча за медіану"
+        )
         return {
             "verdict": "suspicious_low",
             "deviation_pct": dev,
             "message": (
-                f"⛔ Ціна нижча за 25-й перцентиль ринку ({min_price:,.0f} грн). "
+                f"⛔ Ціна {reason}. "
                 f"Відхилення: {dev:+.1f}%. Ризик тіньової угоди."
             ),
         }
-    elif proposed > max_price * 1.3:
+    elif is_above_p85 or is_way_above:
+        reason = (
+            f"вища за розумний максимум ({max_price:,.0f} грн)"
+            if is_above_p85 else
+            f"на {dev:.0f}% вища за медіану"
+        )
         return {
             "verdict": "suspicious_high",
             "deviation_pct": dev,
             "message": (
-                f"⚠️ Ціна підозріло висока (>{max_price:,.0f} грн). "
+                f"⚠️ Ціна {reason}. "
                 f"Відхилення: {dev:+.1f}%. Можливе завищення."
             ),
         }
