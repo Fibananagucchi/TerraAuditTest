@@ -288,10 +288,28 @@ def analyze_satellite_data(lat: float, lon: float, year: int = 2023) -> dict:
     year — рік для якого робиться snapshot (впливає на значення NDVI/VIIRS).
     Завжди повертає результат (real або demo).
     """
-    # NDVI — snapshot за обраний рік (літні місяці для максимального NDVI)
+    # NDVI — рахуємо ПІК ВЕГЕТАЦІЇ (top-3 місяці року за NDVI), а не фіксоване
+    # календарне вікно і не річне середнє.
+    #
+    # Чому не річне середнє: включає зиму (гола земля/сніг, NDVI ~0.05–0.15),
+    # що занижує оцінку навіть для здорових полів.
+    #
+    # Чому не фіксоване вікно травень-вересень: різні типи землі мають різну
+    # фенологію — трави/пасовища пікують навесні (березень-квітень) і в'януть
+    # влітку, а просапні культури (кукурудза, соняшник) пікують саме влітку.
+    # Фіксоване вікно системно пропускає пік для одного з цих випадків.
+    #
+    # "Maximum value composite" (топ-N місяців) — стандартний підхід в
+    # агромоніторингу, коректний незалежно від того, коли саме настає пік.
     ndvi_df = get_ndvi_timeseries(lat, lon, start_year=year, end_year=year)
-    ndvi_val = float(ndvi_df["NDVI"].mean()) if len(ndvi_df) > 0 else 0.15
-    ndbi_val = float(ndvi_df["NDBI"].mean()) if "NDBI" in ndvi_df.columns else 0.0
+
+    if len(ndvi_df) > 0:
+        top_n = min(3, len(ndvi_df))
+        ndvi_val = float(ndvi_df["NDVI"].nlargest(top_n).mean())
+        ndbi_val = float(ndvi_df["NDBI"].mean()) if "NDBI" in ndvi_df.columns else 0.0
+    else:
+        ndvi_val = 0.15
+        ndbi_val = 0.0
 
     # VIIRS — середня за обраний рік
     viirs_df = get_viirs_nightlights(lat, lon, start_year=year, end_year=year)

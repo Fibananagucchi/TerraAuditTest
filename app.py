@@ -12,6 +12,8 @@ import pandas as pd
 import numpy as np
 import folium
 from streamlit_folium import st_folium
+from folium.plugins import Draw
+import math
 import plotly.graph_objects as go
 import plotly.express as px
 
@@ -387,6 +389,41 @@ hr { border-color: #1A2E4A !important; margin: 1.2rem 0 !important; }
 
 
 # ─────────────────────────────────────────────
+# Полігон з карти: площа + центроїд (без зовнішніх залежностей)
+# ─────────────────────────────────────────────
+
+def _polygon_area_ha(coords):
+    """
+    coords: список [lon, lat] (порядок GeoJSON).
+    Локальна рівнокутна проекція навколо центроїда — точність
+    достатня для ділянок розміром до кількох км (похибка <1%).
+    """
+    if len(coords) < 3:
+        return 0.0
+    lat0 = sum(c[1] for c in coords) / len(coords)
+    lon0 = sum(c[0] for c in coords) / len(coords)
+    R = 6378137.0
+    pts = []
+    for lon, lat in coords:
+        x = math.radians(lon - lon0) * R * math.cos(math.radians(lat0))
+        y = math.radians(lat - lat0) * R
+        pts.append((x, y))
+    area = 0.0
+    n = len(pts)
+    for i in range(n):
+        x1, y1 = pts[i]
+        x2, y2 = pts[(i + 1) % n]
+        area += x1 * y2 - x2 * y1
+    return abs(area) / 2.0 / 10000.0  # м² → га
+
+
+def _polygon_centroid(coords):
+    lat0 = sum(c[1] for c in coords) / len(coords)
+    lon0 = sum(c[0] for c in coords) / len(coords)
+    return lat0, lon0
+
+
+# ─────────────────────────────────────────────
 # Session state
 # ─────────────────────────────────────────────
 
@@ -394,7 +431,8 @@ def _init():
     defaults = {
         "sat_data": None, "ndvi_df": None, "viirs_df": None,
         "asset_score": None, "comparison_df": None, "prozorro_df": None,
-        "scan_done": False, "lat": 50.4501, "lon": 30.5234,
+        "scan_done": False,
+        "drawn_polygon": None, "lat": 50.4501, "lon": 30.5234,
         "address": "Київ (за замовчуванням)", "area_ha": 5.0,
         "land_type": "Сільське господарство", "teaser_text": None,
         "min_p": 0, "max_p": 0, "median_p": 0, "budget_result": None,
@@ -456,6 +494,7 @@ with st.sidebar:
             st.session_state.area_ha   = case["area_ha"]
             st.session_state.land_type = case["land_type"]
             st.session_state.address   = case["address"]
+            st.session_state.drawn_polygon = None  # скидаємо намальований контур
 
             if geoai_engine.EE_IS_ACTIVE:
                 # GEE підключено — отримуємо реальні супутникові дані
@@ -509,12 +548,14 @@ with st.sidebar:
             st.session_state.lon = lon
             st.session_state.address = f"Координати: {lat:.4f}, {lon:.4f}"
             st.session_state.scan_done = False
+            st.session_state.drawn_polygon = None
             st.success("✅ Координати розпізнано")
         else:
             lat, lon, addr = geoai_engine.get_coordinates_by_address(address_input)
             if lat:
                 st.session_state.lat = lat; st.session_state.lon = lon
                 st.session_state.address = addr; st.session_state.scan_done = False
+                st.session_state.drawn_polygon = None
                 st.success("✅ Знайдено")
             else:
                 st.error("Не знайдено. Спробуйте координати: 49.444, 31.998")
@@ -657,6 +698,8 @@ with tab_geo:
     map_col, ctrl_col = st.columns([3, 1])
 
     with map_col:
+        st.caption("Намалюйте контур ділянки (полігон) — площа розрахується автоматично, або скористайтесь колом-орієнтиром нижче.")
+
         m = folium.Map(location=[st.session_state.lat, st.session_state.lon], zoom_start=14)
         folium.TileLayer("OpenStreetMap", name="🗺️ Карта").add_to(m)
         folium.TileLayer(
@@ -664,18 +707,78 @@ with tab_geo:
             attr="Esri", name="🛰️ Супутник",
         ).add_to(m)
         folium.LayerControl(position="topright").add_to(m)
-        folium.Circle(
-            [st.session_state.lat, st.session_state.lon],
-            radius=int(np.sqrt(st.session_state.area_ha * 10000 / np.pi)),
-            color="#00D4AA", fill=True, fill_opacity=0.15, weight=2,
-            tooltip=f"Зона аналізу (~{st.session_state.area_ha} га)",
+
+        # Інструмент малювання полігону/прямокутника
+        Draw(
+            export=False,
+            position="topleft",
+            draw_options={
+                "polygon": {"allowIntersection": False, "shapeOptions": {"color": "#00D4AA", "weight": 3}},
+                "rectangle": {"shapeOptions": {"color": "#00D4AA", "weight": 3}},
+                "circle": False,
+                "circlemarker": False,
+                "marker": False,
+                "polyline": False,
+            },
+            edit_options={"edit": True, "remove": True},
         ).add_to(m)
+
+        # Показуємо реальний намальований полігон, якщо він застосований;
+        # інакше — коло-орієнтир на основі площі
+        if st.session_state.get("drawn_polygon"):
+            poly_latlon = [[c[1], c[0]] for c in st.session_state.drawn_polygon]  # [lon,lat] → [lat,lon]
+            folium.Polygon(
+                poly_latlon,
+                color="#00D4AA", weight=3, fill=True, fill_opacity=0.2,
+                tooltip=f"Застосована ділянка (~{st.session_state.area_ha} га)",
+            ).add_to(m)
+        else:
+            folium.Circle(
+                [st.session_state.lat, st.session_state.lon],
+                radius=int(np.sqrt(st.session_state.area_ha * 10000 / np.pi)),
+                color="#00D4AA", fill=True, fill_opacity=0.15, weight=2,
+                tooltip=f"Зона аналізу (~{st.session_state.area_ha} га, орієнтовне коло)",
+            ).add_to(m)
+
         folium.Marker(
             [st.session_state.lat, st.session_state.lon],
             tooltip=st.session_state.address[:60],
             icon=folium.Icon(color="green", icon="circle", prefix="fa"),
         ).add_to(m)
-        st_folium(m, width=None, height=320, returned_objects=[])
+
+        map_data = st_folium(
+            m, width=None, height=380,
+            returned_objects=["last_active_drawing"],
+            key="terraaudit_map",
+        )
+
+        # ── Обробка щойно намальованого полігону (ще не застосованого) ──
+        drawing = map_data.get("last_active_drawing") if map_data else None
+        if drawing and drawing.get("geometry", {}).get("type") in ("Polygon", "MultiPolygon"):
+            geom = drawing["geometry"]
+            ring = geom["coordinates"][0] if geom["type"] == "Polygon" else geom["coordinates"][0][0]
+            drawn_area_ha = _polygon_area_ha(ring)
+            drawn_lat, drawn_lon = _polygon_centroid(ring)
+
+            st.markdown(f"""
+            <div style="background:#0D2519;border:1px solid #00C49A;border-radius:8px;
+                padding:0.7rem 1rem;margin-top:0.6rem;display:flex;justify-content:space-between;align-items:center">
+                <span style="color:#C8D4E8;font-size:0.85rem">
+                    Намальовано контур: <b style="color:#00D4AA">{drawn_area_ha:.2f} га</b>
+                    · центр {drawn_lat:.5f}, {drawn_lon:.5f}
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
+
+            if st.button("Застосувати цю ділянку", type="primary", use_container_width=True, key="apply_drawn"):
+                st.session_state.lat = drawn_lat
+                st.session_state.lon = drawn_lon
+                st.session_state.area_ha = round(drawn_area_ha, 2)
+                st.session_state.address = f"Намальована ділянка ({drawn_lat:.5f}, {drawn_lon:.5f})"
+                st.session_state.drawn_polygon = ring  # зберігаємо реальний контур
+                st.session_state.scan_done = False
+                st.success(f"✅ Застосовано: {drawn_area_ha:.2f} га")
+                st.rerun()
 
     with ctrl_col:
         st.markdown(f"""
@@ -913,9 +1016,11 @@ with tab_geo:
             <div style="background:#0B1425;border:1px solid #1A2E4A;border-radius:8px;padding:0.7rem 1rem;flex:1;min-width:240px">
                 <div style="font-size:0.68rem;color:#3D5070;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:0.4rem">NDVI · Індекс рослинності</div>
                 <div style="font-size:0.8rem;color:#B0BDD4;line-height:1.5">
-                    Показує, наскільки активно земля використовується як сільськогосподарська.
-                    Здорове поле — вище <span style="color:#F5A623">0.3</span> з чітким сезонним циклом.
-                    Пласка лінія нижче порогу — ділянка <span style="color:#FF6B6B">не обробляється</span>.
+                    Показує, наскільки активно земля використовується. Оцінка рахується за
+                    <b>пік вегетації</b> (топ-3 місяці року за NDVI) — це коректно і для трав/пасовищ
+                    (пік навесні), і для просапних культур (пік влітку), на відміну від фіксованого
+                    календарного вікна чи річного середнього. Здоровий пік — вище
+                    <span style="color:#F5A623">0.35</span>.
                 </div>
             </div>
             <div style="background:#0B1425;border:1px solid #1A2E4A;border-radius:8px;padding:0.7rem 1rem;flex:1;min-width:240px">
@@ -947,14 +1052,19 @@ with tab_geo:
                     line=dict(color="#FF6B6B", width=1.5, dash="dot"), opacity=0.7,
                 ))
             if is_agri:
-                fig.add_hline(y=0.3, line_dash="dash", line_color="#F5A623",
-                              annotation_text="Норма с/г", annotation_font_color="#F5A623")
+                fig.add_hline(y=0.35, line_dash="dash", line_color="#F5A623",
+                              annotation_text="Норма (пік вегетації)",
+                              annotation_font_color="#F5A623")
             fig.add_hrect(y0=-0.2, y1=0.2, fillcolor="#FF6B6B", opacity=0.04)
             fig.update_layout(title="Sentinel-2 · NDVI / NDBI", height=340,
                               legend=dict(orientation="h", y=-0.3, bgcolor="rgba(0,0,0,0)"),
                               **PLOTLY_DARK)
             st.plotly_chart(fig, use_container_width=True)
-            st.caption("Джерело: ESA Sentinel-2 via Google Earth Engine")
+            st.caption(
+                "Джерело: ESA Sentinel-2 via Google Earth Engine · "
+                "Asset Score рахується за середнім топ-3 місяців року (пік вегетації), "
+                "не за фіксованим календарним вікном"
+            )
 
         with c2:
             viirs_df = st.session_state.viirs_df
