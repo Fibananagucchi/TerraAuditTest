@@ -344,6 +344,12 @@ hr { border-color: #1A2E4A !important; margin: 1.2rem 0 !important; }
     display: grid; grid-template-columns: 1fr 1fr 1fr 1fr;
     gap: 0.6rem; margin-top: 0.4rem; margin-bottom: 0.6rem;
 }
+.ta-combo-wrap {
+    display: flex; gap: 0.7rem; align-items: stretch; margin-bottom: 0.8rem;
+}
+.ta-combo-score {
+    flex: 0 0 200px;
+}
 .ta-sat-cell {
     background: #080E1C;
     border: 1px solid #1A2E4A;
@@ -383,6 +389,78 @@ hr { border-color: #1A2E4A !important; margin: 1.2rem 0 !important; }
     text-transform: uppercase; letter-spacing: 0.1em;
     font-weight: 600; margin: 1rem 0 0.4rem 0;
     font-family: 'Space Grotesk', sans-serif;
+}
+
+/* ── Demo warning banner (base) ── */
+.ta-demo-banner {
+    position: fixed;
+    bottom: 1.5rem;
+    right: 1.5rem;
+    z-index: 9999;
+    background: #1A1200;
+    border: 1px solid #F5A623;
+    border-left: 4px solid #F5A623;
+    border-radius: 10px;
+    padding: 0.9rem 1.2rem;
+    max-width: 320px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+}
+
+/* ═════════════════════════════════════════════════════
+   MOBILE RESPONSIVE — телефони та вузькі екрани
+   ═════════════════════════════════════════════════════ */
+
+/* Планшети та менші ноутбуки */
+@media (max-width: 900px) {
+    .main .block-container { padding: 1rem 1rem 1.5rem 1rem !important; }
+    .ta-sat-grid { grid-template-columns: 1fr 1fr !important; }
+    .ta-combo-wrap { flex-wrap: wrap; }
+    .ta-combo-score { flex: 1 1 100%; }
+}
+
+/* Телефони */
+@media (max-width: 640px) {
+    .main .block-container { padding: 0.7rem 0.6rem 1.2rem 0.6rem !important; }
+
+    /* Заголовок компактніше */
+    .ta-header { padding: 1rem 1.2rem !important; }
+    .ta-logo { font-size: 1.25rem !important; }
+    .ta-tagline { font-size: 0.68rem !important; }
+    .ta-breadcrumb { font-size: 0.65rem !important; line-height: 1.5; }
+
+    /* Телеметрія — 1 колонка на телефоні */
+    .ta-sat-grid { grid-template-columns: 1fr !important; }
+    .ta-sat-cell { padding: 0.5rem 0.7rem; }
+
+    /* Asset Score картка на всю ширину над телеметрією */
+    .ta-combo-wrap { flex-direction: column; }
+    .ta-combo-score { flex: 1 1 auto; width: 100%; }
+
+    /* Demo-банер — більше не floating, вужчий і не перекриває контент */
+    .ta-demo-banner {
+        position: fixed;
+        left: 0.5rem;
+        right: 0.5rem;
+        bottom: 0.5rem;
+        max-width: none;
+        padding: 0.7rem 0.9rem;
+        font-size: 0.9em;
+    }
+
+    /* Таби — менший шрифт, щоб влізли в один ряд без перекриття */
+    .stTabs [data-baseweb="tab"] {
+        font-size: 0.72rem !important;
+        padding: 0.35rem 0.6rem !important;
+    }
+
+    /* Sidebar лого трохи менше */
+    .ta-sidebar-logo { font-size: 1.1rem; }
+}
+
+/* Дуже вузькі телефони (менше 380px) */
+@media (max-width: 380px) {
+    .ta-logo { font-size: 1.05rem !important; }
+    .ta-score-num, [style*="font-size:2.4rem"] { font-size: 1.9rem !important; }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -651,19 +729,7 @@ st.markdown(f"""
 
 if not gee_live:
     st.markdown("""
-    <div style="
-        position: fixed;
-        bottom: 1.5rem;
-        right: 1.5rem;
-        z-index: 9999;
-        background: #1A1200;
-        border: 1px solid #F5A623;
-        border-left: 4px solid #F5A623;
-        border-radius: 10px;
-        padding: 0.9rem 1.2rem;
-        max-width: 320px;
-        box-shadow: 0 4px 24px rgba(0,0,0,0.5);
-    ">
+    <div class="ta-demo-banner">
         <div style="font-size:0.75rem;font-weight:700;color:#F5A623;letter-spacing:0.06em;margin-bottom:0.35rem">
             DEMO РЕЖИМ
         </div>
@@ -880,8 +946,8 @@ with tab_geo:
             return {"ok": "#00D4AA", "warn": "#F5A623", "err": "#FF6B6B"}.get(cls, "#B0BDD4")
 
         st.markdown(f"""
-        <div style="display:flex;gap:0.7rem;align-items:stretch;margin-bottom:0.8rem">
-            <div style="flex:0 0 200px;background:rgba(0,0,0,0.55);border-radius:10px;
+        <div class="ta-combo-wrap">
+            <div class="ta-combo-score" style="background:rgba(0,0,0,0.55);border-radius:10px;
                 padding:1rem 1.2rem;border:2px solid {sc.color};display:flex;
                 flex-direction:column;justify-content:center;position:relative;overflow:hidden">
                 <div style="position:absolute;inset:0;background:{sc.color};opacity:0.18;border-radius:inherit"></div>
@@ -893,7 +959,7 @@ with tab_geo:
                     margin-top:0.3rem;line-height:1.4">{sc.summary}</div>
                 </div>
             </div>
-            <div style="flex:1;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:0.6rem">
+            <div class="ta-sat-grid" style="flex:1;margin:0">
                 <div class="ta-sat-cell">
                     <div class="ta-sat-label">NDVI · Sentinel-2</div>
                     <div class="ta-sat-value {ndvi_cls}">{ndvi:.3f}</div>
