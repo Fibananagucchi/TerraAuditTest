@@ -6,7 +6,7 @@ plotly
 pandas
 numpy
 scipy
-pulp
+pulp>=2.8,<4
 groq
 requests
 python-dotenv
